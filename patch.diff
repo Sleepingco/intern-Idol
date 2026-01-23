@@ -1,0 +1,151 @@
+*** Begin Patch
+*** Update File: main.py
+@@
+-from app.camera import build_projection_from_intrinsics, normalize_rotation3x3
+-from app.display import compute_view_rect, apply_display_mode
+-from app.background import fit_background_image
+-import app.debug as app_debug
++from app.camera import build_projection_from_intrinsics, normalize_rotation3x3
++from app.display import compute_view_rect, apply_display_mode
++from app.background import fit_background_image
++import app.debug as app_debug
+@@
+-def _build_projection_from_intrinsics(W, H):
+-    fx = fy = cx = cy = None
+-    if getattr(config, "USE_INTRINSICS", False):
+-        try:
+-            import json, os
+-
+-            jpath = getattr(config, "INTRINSICS_JSON", "")
+-            if jpath and os.path.isfile(jpath):
+-                with open(jpath, "r", encoding="utf-8") as f:
+-                    j = json.load(f)
+-                fx = float(j["fx"])
+-                fy = float(j["fy"])
+-                cx = float(j.get("cx", W / 2.0))
+-                cy = float(j.get("cy", H / 2.0))
+-        except Exception as e:
+-            print("[WARN] intrinsics.json ?ех? ????:", e)
+-    # Fallback: ???? ???? ???? ???? (HFOV?? ?? ???, ?????? ?????? ??????)
+-    if fx is None:
+-        fx = fy = float(W) * 0.4  # ?? ???? FOV?? ????????? ??? ??????? ????
+-        cx = float(W) / 2.0
+-        cy = float(H) / 2.0
+-
+-    from utils import perspective_from_intrinsics
+-
+-    P = perspective_from_intrinsics(fx, fy, cx, cy, config.NEAR_Z, config.FAR_Z, W, H)
+-    return P, (fx, fy, cx, cy)  # <- ????: intrinsics?? ???? ???
++ 
+@@
+-def _fit_background_image(img_bgr, W, H, mode="cover"):
+-    h, w = img_bgr.shape[:2]
+-    if mode == "stretch":
+-        return cv2.resize(img_bgr, (W, H), interpolation=cv2.INTER_LINEAR)
+-    scale_w = W / float(w)
+-    scale_h = H / float(h)
+-    if mode == "contain":
+-        s = min(scale_w, scale_h)
+-        nw, nh = max(1, int(round(w * s))), max(1, int(round(h * s)))
+-        resized = cv2.resize(img_bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
+-        canvas = np.zeros((H, W, 3), dtype=np.uint8)
+-        x0 = (W - nw) // 2
+-        y0 = (H - nh) // 2
+-        canvas[y0 : y0 + nh, x0 : x0 + nw] = resized
+-        return canvas
+-    # cover (default): fill and center-crop
+-    s = max(scale_w, scale_h)
+-    nw, nh = max(1, int(round(w * s))), max(1, int(round(h * s)))
+-    resized = cv2.resize(img_bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
+-    x0 = (nw - W) // 2
+-    y0 = (nh - H) // 2
+-    return resized[y0 : y0 + H, x0 : x0 + W]
++ 
+@@
+-def _compute_view_rect(screen_w, screen_h, W, H):
+-    cam_aspect = W / H
+-    screen_aspect = screen_w / screen_h
+-    if screen_aspect > cam_aspect:
+-        view_h = screen_h
+-        view_w = int(view_h * cam_aspect)
+-        view_x = (screen_w - view_w) // 2
+-        view_y = 0
+-    else:
+-        view_w = screen_w
+-        view_h = int(view_w / cam_aspect)
+-        view_x = 0
+-        view_y = (screen_h - view_h) // 2
+-    return view_x, view_y, view_w, view_h
+-
+-
+-def _apply_display_mode(fullscreen, last_view_size, W, H):
+-    """fullscreen True: ????? ??u, False: '???? ??? ???' a ???.
+-    ???: (screen_w, screen_h, view_x, view_y, view_w, view_h, new_last_view)
+-    """
+-    if fullscreen:
+-        info = pygame.display.Info()
+-        screen_w, screen_h = info.current_w, info.current_h
+-        pygame.display.set_mode((screen_w, screen_h), DOUBLEBUF | OPENGL | FULLSCREEN)
+-        vx, vy, vw, vh = compute_view_rect(screen_w, screen_h, W, H)
+-        new_last_view = (vw, vh)  # ???? a ??? ???? ???
+-    else:
+-        win_w, win_h = last_view_size
+-        pygame.display.set_mode((int(win_w), int(win_h)), DOUBLEBUF | OPENGL)
+-        screen_w, screen_h = int(win_w), int(win_h)
+-        vx, vy, vw, vh = compute_view_rect(screen_w, screen_h, W, H)
+-        new_last_view = (vw, vh)
+-
+-    # GL ???вм? ??? ???? (???ес??/???????? ????? ????)
+-    glEnable(GL_DEPTH_TEST)
+-    glDisable(GL_CULL_FACE)
+-    glEnable(GL_BLEND)
+-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+-
+-    return screen_w, screen_h, vx, vy, vw, vh, new_last_view
++ 
+@@
+-def _create_debug_frame_local(frame, jaw_mask_u8):
+-    if jaw_mask_u8 is None:
+-        return np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+-    overlay = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).copy()
+-    color_layer = np.zeros_like(overlay)
+-    color_layer[:] = config.JAW_COLOR
+-    m = (jaw_mask_u8.astype(np.float32) / 255.0) * float(config.JAW_ALPHA)
+-    frame_rgb = np.ascontiguousarray(
+-        (overlay * (1.0 - m[..., None]) + color_layer * m[..., None]).astype(np.uint8)
+-    )
+-    return frame_rgb
+-
+-
+-def calculate_hat_transform_matrix(M_smooth):
+-    if M_smooth is None:
+-        return None
+-    O_hat_base = rebuild_hat_base_O()
+-    return (M_smooth @ np.diag([1, 1, -1, 1]).astype(np.float32) @ O_hat_base).astype(
+-        np.float32
+-    )
+-
+-
+-def _normalize_rotation3x3(R):
+-    Rn = R.copy()
+-    for i in range(3):
+-        n = np.linalg.norm(Rn[:, i]) + 1e-8
+-        Rn[:, i] /= n
+-    return Rn
+-
+-
+-def _two_orthonormal(v):
+-    """v(3,)?? ?????? 2?? ???????? U(3x2) ???"""
+-    v = v / (np.linalg.norm(v) + 1e-8)
+-    a = (
+-        np.array([1.0, 0.0, 0.0], np.float32)
+-        if abs(v[0]) < 0.9
+-        else np.array([0.0, 1.0, 0.0], np.float32)
+-    )
+-    u1 = np.cross(v, a)
+-    u1 /= np.linalg.norm(u1) + 1e-8
+-    u2 = np.cross(v, u1)
+-    u2 /= np.linalg.norm(u2) + 1e-8
+-    return np.stack([u1, u2], axis=1)  # (3x2)
++ 
+*** End Patch
