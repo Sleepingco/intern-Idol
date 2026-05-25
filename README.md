@@ -104,7 +104,7 @@ python main.py
 
 ---
 
-## 7) 포트폴리오 관점에서 강조할 점
+## 7) 특징
 
 - **CV + Graphics 융합 역량**: 랜드마크 기반 pose 정합과 OpenGL 렌더링의 end-to-end 통합.
 - **실시간 최적화/안정화 경험**: 마스크 스무딩, 게이팅, fallback 경로 설계.
